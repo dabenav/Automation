@@ -1,0 +1,77 @@
+import paramiko
+import socket
+
+def is_ssh_port_open(ip):
+    try:
+        # Check if port 22 (SSH) is open on the device.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect((ip, 22))
+        sock.close()
+        return True
+    except Exception:
+        return False
+
+def ssh_to_switch(ip, username, password, commands):
+    try:
+        # SSH into the switch, automatically accept fingerprint.
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(ip, username=username, password=password, timeout=10)
+        
+        outputs = {}
+        for cmd in commands:
+            stdin, stdout, stderr = client.exec_command(cmd)
+            outputs[cmd] = stdout.read().decode('utf-8')
+        
+        client.close()
+        return outputs
+    except Exception as e:
+        print(f"Unable to connect to {ip}: {str(e)}")
+        return None
+
+def main():
+    with open('switches.txt') as f:
+        switches = f.read().splitlines()
+
+    username = 'daniel'
+    password = 'daniel'
+
+    for switch_ip in switches:
+        if not is_ssh_port_open(switch_ip):
+            print(f"Port 22 is not open on {switch_ip}. Moving to the next device.")
+            continue
+
+        print(f"Connecting to {switch_ip}...")
+        outputs = ssh_to_switch(switch_ip, username, password, [
+            "show interfaces | include VLAN10",
+            "show mac address-table dynamic vlan 10"
+        ])
+
+        if outputs is None:
+            continue
+
+        vlan_10_interfaces = outputs["show interfaces | include VLAN10"].splitlines()
+        mac_addresses = outputs["show mac address-table dynamic vlan 10"].splitlines()
+
+        for line in vlan_10_interfaces:
+            parts = line.split()
+            if len(parts) >= 1:
+                interface = parts[0]
+                for mac_line in mac_addresses:
+                    if interface in mac_line:
+                        mac = mac_line.split()[1]
+                        print(f"IP: {switch_ip}, Port: {interface}, MAC: {mac}")
+
+        change_vlan = input(f"Do you want to change all interfaces on {switch_ip} to VLAN 30? (yes/no): ").strip().lower()
+        
+        if change_vlan == 'yes':
+            change_vlan_commands = [f"interface {interface}\nswitchport access vlan 30" for interface in vlan_10_interfaces]
+            results = ssh_to_switch(switch_ip, username, password, change_vlan_commands)
+
+            print(f"Results for {switch_ip}:\n")
+            for cmd, result in results.items():
+                print(f"Command: {cmd}\n{result}\n{'='*50}\n")
+
+if __name__ == "__main__":
+    main()
