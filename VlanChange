@@ -36,6 +36,7 @@ def main():
 
     username = 'daniel'
     password = 'daniel'
+    commands = ["show run | in hostname", "show interface status"]
 
     for switch_ip in switches:
         if not is_ssh_port_open(switch_ip):
