@@ -1,3 +1,4 @@
+
 import socket
 import getpass
 from netmiko import ConnectHandler
@@ -10,8 +11,8 @@ def is_port_open(ip):
     except (socket.timeout, ConnectionRefusedError):
         return False
 
-# Function to SSH into a switch and perform tasks
-def ssh_and_manage_switch(ip, username, password):
+# Function to SSH into a switch and change VLAN to 30
+def ssh_and_change_vlan(ip, interface, username, password):
     # Initialize device details for netmiko
     device = {
         "device_type": "cisco_ios",
@@ -25,38 +26,11 @@ def ssh_and_manage_switch(ip, username, password):
         # Connect to the switch using netmiko
         ssh_session = ConnectHandler(**device)
 
-        # Task 3.1: Identify access ports belonging to VLAN 10
-        access_ports_vlan_10 = []
-        output = ssh_session.send_command("show interface status vlan 10")
-        lines = output.splitlines()
-        headers = lines[0].split()
-        for line in lines[1:]:
-            parts = line.split()
-            if len(parts) == len(headers):
-                if parts[2] != "notconnect" and parts[3] != "disabled":
-                    access_ports_vlan_10.append(parts[0])
-
-        # Task 3.2: Get MAC addresses of VLAN 10 access ports
-        mac_addresses = {}
-        for port in access_ports_vlan_10:
-            output = ssh_session.send_command(f"show mac address-table interface {port}")
-            for line in output.splitlines():
-                if "DYNAMIC" in line:
-                    parts = line.split()
-                    mac_address = parts[1]
-                    mac_addresses[port] = mac_address
-
-        # Task 3.3: Print switch IP, switch port, and MAC address
-        for port, mac_address in mac_addresses.items():
-            print(f"Switch IP: {ip}, Switch Port: {port}, MAC Address: {mac_address}")
-
-        # Task 4: Change interfaces to VLAN 30 (optional)
-        change_to_vlan_30 = input("Do you want to change all interfaces to VLAN 30? (yes/no): ").strip().lower()
-        if change_to_vlan_30 == "yes":
-            config_commands = [f"interface {port}", "switchport access vlan 30", "end"]
-            config_result = ssh_session.send_config_set(config_commands)
-            print("Configuration result:")
-            print(config_result)
+        # Task 2: Change interface VLAN to 30
+        config_commands = [f"interface {interface}", "switchport access vlan 30", "end"]
+        config_result = ssh_session.send_config_set(config_commands)
+        print(f"Configuration result for {ip} ({interface}):")
+        print(config_result)
 
         # Task 3: Print success message if SSH connection is successful
         print(f"Successfully connected to {ip}")
@@ -65,18 +39,18 @@ def ssh_and_manage_switch(ip, username, password):
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    # Read a list of switch IPs from a text file
-    with open("switches.txt", "r") as file:
-        switch_ips = [line.strip() for line in file.readlines()]
+    # Read IP and interface information from a text file
+    with open("Interfaces.txt", "r") as file:
+        interface_info = [line.strip().split(", ") for line in file.readlines()]
 
     username = input("Enter your SSH username: ")
     password = getpass.getpass("Enter your SSH password: ")
 
-    for ip in switch_ips:
-        # Task 2: Test if port 22 is open
+    for ip, interface, _ in interface_info:
+        # Task 1: Test if port 22 is open
         if not is_port_open(ip):
             print(f"Port 22 is not open on {ip}. Skipping...")
             continue
 
-        # Task 3: SSH into the switch and perform tasks
-        ssh_and_manage_switch(ip, username, password)
+        # Task 2: SSH into the switch and change VLAN to 30
+        ssh_and_change_vlan(ip, interface, username, password)
