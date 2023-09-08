@@ -1,78 +1,82 @@
-import paramiko
 import socket
+import getpass
+from netmiko import ConnectHandler
 
-def is_ssh_port_open(ip):
+# Function to test if port 22 is open
+def is_port_open(ip):
     try:
-        # Check if port 22 (SSH) is open on the device.
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
-        sock.connect((ip, 22))
-        sock.close()
+        socket.create_connection((ip, 22), timeout=2)
         return True
-    except Exception:
+    except (socket.timeout, ConnectionRefusedError):
         return False
 
-def ssh_to_switch(ip, username, password, commands):
+# Function to SSH into a switch and perform tasks
+def ssh_and_manage_switch(ip, username, password):
+    # Initialize device details for netmiko
+    device = {
+        "device_type": "cisco_ios",
+        "ip": ip,
+        "username": username,
+        "password": password,
+        "auto_accept_hostkeys": True,  # Automatically accept SSH fingerprints
+    }
+
     try:
-        # SSH into the switch, automatically accept fingerprint.
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip, username=username, password=password, timeout=10)
-        
-        outputs = {}
-        for cmd in commands:
-            stdin, stdout, stderr = client.exec_command(cmd)
-            outputs[cmd] = stdout.read().decode('utf-8')
-        
-        client.close()
-        return outputs
-    except Exception as e:
-        print(f"Unable to connect to {ip}: {str(e)}")
-        return None
+        # Connect to the switch using netmiko
+        ssh_session = ConnectHandler(**device)
 
-def main():
-    with open('switches.txt') as f:
-        switches = f.read().splitlines()
-
-    username = 'daniel'
-    password = 'daniel'
-    commands = ["show run | in hostname", "show interface status"]
-
-    for switch_ip in switches:
-        if not is_ssh_port_open(switch_ip):
-            print(f"Port 22 is not open on {switch_ip}. Moving to the next device.")
-            continue
-
-        print(f"Connecting to {switch_ip}...")
-        outputs = ssh_to_switch(switch_ip, username, password, [
-            "show interfaces | include VLAN10",
-            "show mac address-table dynamic vlan 10"
-        ])
-
-        if outputs is None:
-            continue
-
-        vlan_10_interfaces = outputs["show interfaces | include VLAN10"].splitlines()
-        mac_addresses = outputs["show mac address-table dynamic vlan 10"].splitlines()
-
-        for line in vlan_10_interfaces:
+        # Task 3.1: Identify access ports belonging to VLAN 10
+        access_ports_vlan_10 = []
+        output = ssh_session.send_command("show interface status vlan 10")
+        lines = output.splitlines()
+        headers = lines[0].split()
+        for line in lines[1:]:
             parts = line.split()
-            if len(parts) >= 1:
-                interface = parts[0]
-                for mac_line in mac_addresses:
-                    if interface in mac_line:
-                        mac = mac_line.split()[1]
-                        print(f"IP: {switch_ip}, Port: {interface}, MAC: {mac}")
+            if len(parts) == len(headers):
+                if parts[2] != "notconnect" and parts[3] != "disabled":
+                    access_ports_vlan_10.append(parts[0])
 
-        change_vlan = input(f"Do you want to change all interfaces on {switch_ip} to VLAN 30? (yes/no): ").strip().lower()
-        
-        if change_vlan == 'yes':
-            change_vlan_commands = [f"interface {interface}\nswitchport access vlan 30" for interface in vlan_10_interfaces]
-            results = ssh_to_switch(switch_ip, username, password, change_vlan_commands)
+        # Task 3.2: Get MAC addresses of VLAN 10 access ports
+        mac_addresses = {}
+        for port in access_ports_vlan_10:
+            output = ssh_session.send_command(f"show mac address-table interface {port}")
+            for line in output.splitlines():
+                if "DYNAMIC" in line:
+                    parts = line.split()
+                    mac_address = parts[1]
+                    mac_addresses[port] = mac_address
 
-            print(f"Results for {switch_ip}:\n")
-            for cmd, result in results.items():
-                print(f"Command: {cmd}\n{result}\n{'='*50}\n")
+        # Task 3.3: Print switch IP, switch port, and MAC address
+        for port, mac_address in mac_addresses.items():
+            print(f"Switch IP: {ip}, Switch Port: {port}, MAC Address: {mac_address}")
+
+        # Task 4: Change interfaces to VLAN 30 (optional)
+        change_to_vlan_30 = input("Do you want to change all interfaces to VLAN 30? (yes/no): ").strip().lower()
+        if change_to_vlan_30 == "yes":
+            config_commands = [f"interface {port}", "switchport access vlan 30", "end"]
+            config_result = ssh_session.send_config_set(config_commands)
+            print("Configuration result:")
+            print(config_result)
+
+        # Task 3: Print success message if SSH connection is successful
+        print(f"Successfully connected to {ip}")
+
+    except Exception as e:
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
-    main()
+    # Read a list of switch IPs from a text file
+    with open("switches.txt", "r") as file:
+        switch_ips = [line.strip() for line in file.readlines()]
+
+    username = input("Enter your SSH username: ")
+    password = getpass.getpass("Enter your SSH password: ")
+
+    for ip in switch_ips:
+        # Task 2: Test if port 22 is open
+        if not is_port_open(ip):
+            print(f"Port 22 is not open on {ip}. Skipping...")
+            continue
+
+        # Task 3: SSH into the switch and perform tasks
+        ssh_and_manage_switch(ip, username, password)
