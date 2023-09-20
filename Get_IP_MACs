@@ -1,24 +1,31 @@
+# Get Mac
+import time
 import socket
-import getpass
 from netmiko import ConnectHandler
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Function to test if port 22 is open
 def is_port_open(ip):
     try:
         socket.create_connection((ip, 22), timeout=2)
+        print(f'{ip} SSH port open')
         return True
     except (socket.timeout, ConnectionRefusedError):
+        print(f'{ip} SSH port close')
         return False
 
 # Function to SSH into a switch and perform tasks
-def ssh_and_manage_switch(ip, username, password):
+def ssh_and_manage_switch(ip):
     # Initialize device details for netmiko
     device = {
         "device_type": "cisco_ios",
         "ip": ip,
-        "username": username,
-        "password": password,
-        "auto_accept_hostkeys": True,  # Automatically accept SSH fingerprints
+        "username": os.getenv("SSH_USERNAME"),
+        "password": os.getenv("SSH_PASSWORD")
     }
 
     try:
@@ -26,17 +33,21 @@ def ssh_and_manage_switch(ip, username, password):
         ssh_session = ConnectHandler(**device)
 
         # Task 3.1: Identify access ports belonging to VLAN 10
+        print('Identify access ports belonging to VLAN 10')
         access_ports_vlan_10 = []
-        output = ssh_session.send_command("show interface status | include __10__")
+        output = ssh_session.send_command("show interface status | in connected    1__|notconnect   1__")
         lines = output.splitlines()
         for line in lines:
             parts = line.split()
+            #print(parts)
             if len(parts) >= 3:
                 interface = parts[0]
+                #print(interface)
                 access_ports_vlan_10.append(interface)
 
         # Task 3.2: Get MAC addresses of VLAN 10 access ports
         mac_addresses = {}
+        print('Get MAC addresses of VLAN 10 access ports')
         for port in access_ports_vlan_10:
             output = ssh_session.send_command(f"show mac address-table interface {port}")
             for line in output.splitlines():
@@ -46,10 +57,12 @@ def ssh_and_manage_switch(ip, username, password):
                     mac_addresses[port] = mac_address
 
         # Task 3.3: Save MAC addresses to a text file
+        print('Save MAC addresses to a text file')
+        current_time = time.strftime('%Y-%m-%d %H:%M:%S')
         with open("Interfaces.txt", "a") as f:
             for port, mac_address in mac_addresses.items():
-                f.write(f"{ip}, {port}, {mac_address}\n")
-
+                f.write(f"{ip}, {port}, {mac_address}, {current_time}\n")
+       
         # Task 3: Print success message if SSH connection is successful
         print(f"Successfully connected to {ip}")
 
@@ -61,9 +74,6 @@ if __name__ == "__main__":
     with open("switches.txt", "r") as file:
         switch_ips = [line.strip() for line in file.readlines()]
 
-    username = input("Enter your SSH username: ")
-    password = getpass.getpass("Enter your SSH password: ")
-
     for ip in switch_ips:
         # Task 2: Test if port 22 is open
         if not is_port_open(ip):
@@ -71,4 +81,4 @@ if __name__ == "__main__":
             continue
 
         # Task 3: SSH into the switch and perform tasks
-        ssh_and_manage_switch(ip, username, password)
+        ssh_and_manage_switch(ip)
